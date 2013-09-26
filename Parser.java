@@ -6,6 +6,8 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Dictionary;
 import java.util.Hashtable;
+import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 
 class Util {
   public static String escapeChar(char c) {
@@ -385,8 +387,17 @@ class BinopExpr extends Expr {
 
 class FnExpr extends Expr {
   public double eval(Dictionary<String, Double> vars) {
-    // TODO: hardcode sin/cos or whatever
-    return arg.eval(vars);
+    double d = arg.eval(vars);
+    try {
+      Method m = Math.class.getDeclaredMethod(fn, Double.TYPE);
+      return (double) m.invoke(null, d);
+    } catch (NoSuchMethodException e) {
+      throw new RuntimeException(e);
+    } catch (IllegalAccessException e) {
+      throw new RuntimeException(e);
+    } catch (InvocationTargetException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   public String toString() {
