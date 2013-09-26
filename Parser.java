@@ -63,10 +63,7 @@ class Util {
 enum TokenType {
   LIT_NUM,
   IDENT,
-  OP_PLUS,
-  OP_MINUS,
-  OP_MUL,
-  OP_DIV,
+  BINOP,
   PAREN_OPEN,
   PAREN_CLOSE,
 }
@@ -96,10 +93,7 @@ class Token {
       case IDENT:
         System.out.println((String) content);
         break;
-      case OP_PLUS:
-      case OP_MINUS:
-      case OP_MUL:
-      case OP_DIV:
+      case BINOP:
       case PAREN_OPEN:
       case PAREN_CLOSE:
         System.out.println();
@@ -175,18 +169,16 @@ class Tokenizer implements Iterator<Token> {
     if (Character.isLetter(c) || 'c' == '_')
       return consumeIdentifier();
 
-    ++pos;
+    if (Binop.isValidBinopChar(c))
+      return consumeBinop();
+
     switch (c) {
-      case '+': return new Token(TokenType.OP_PLUS, null, pos - 1, 1);
-      case '-': return new Token(TokenType.OP_MINUS, null, pos - 1, 1);
-      case '*': return new Token(TokenType.OP_MUL, null, pos - 1, 1);
-      case '/': return new Token(TokenType.OP_DIV, null, pos - 1, 1);
-      case '(': return new Token(TokenType.PAREN_OPEN, null, pos - 1, 1);
-      case ')': return new Token(TokenType.PAREN_CLOSE, null, pos - 1, 1);
-      default: break;
+      case '(': return new Token(TokenType.PAREN_OPEN, null, pos++, 1);
+      case ')': return new Token(TokenType.PAREN_CLOSE, null, pos++, 1);
+      default:  break;
     }
 
-    fatal("illegal start of token: " + Util.escapeChar(c), pos - 1, pos);
+    fatal("illegal start of token: " + Util.escapeChar(c), pos, pos+1);
     return null;
   }
 
@@ -216,7 +208,19 @@ class Tokenizer implements Iterator<Token> {
     consumeIdentChars();
     Token t = new Token(TokenType.IDENT,
         src.substring(begin, pos),
-        begin, pos - begin); 
+        begin, pos - begin);
+    return t;
+  }
+
+  private Token consumeBinop() throws SpanException {
+    int begin = pos;
+    ++pos;
+    consumeBinopChars();
+    String s = src.substring(begin, pos);
+    Binop b = Binop.fromString(s);
+    if (b == null)
+      fatal("unknown binary operator: " + s, begin, pos);
+    Token t = new Token(TokenType.BINOP, b, begin, pos - begin);
     return t;
   }
 
@@ -247,6 +251,11 @@ class Tokenizer implements Iterator<Token> {
 
   private void consumeWhitespace() {
     while (pos < src.length() && Character.isWhitespace(src.charAt(pos)))
+      ++pos;
+  }
+
+  private void consumeBinopChars() {
+    while (pos < src.length() && Binop.isValidBinopChar(src.charAt(pos)))
       ++pos;
   }
 
@@ -293,17 +302,51 @@ class VarExpr extends Expr {
   String ident;
 }
 
+enum Assoc { LEFT, RIGHT }
+
+// prec;
+// 0 + -
+// 1 * /
+// 2 unary + -
+
 enum Binop {
-  ADD, SUBTRACT, MULTIPLY, DIVIDE;
+  ADD      (0, Assoc.LEFT,  "+"),
+  SUBTRACT (0, Assoc.LEFT,  "-"),
+  MULTIPLY (1, Assoc.LEFT,  "*"),
+  DIVIDE   (1, Assoc.LEFT,  "/"),
+  POWER    (3, Assoc.RIGHT, "**");
+
+
+  public int precedence;
+  public Assoc assoc;
+  public String symbol;
+
+  Binop(int prec, Assoc a, String sym) {
+    precedence = prec;
+    assoc = a;
+    symbol = sym;
+  }
+
+  public static Binop fromString(String s) {
+    for (Binop b: Binop.values()) {
+      if (b.symbol.equals(s))
+        return b;
+    }
+    return null;
+  }
+
+  public static boolean isValidBinopChar(char c) {
+    switch (c) {
+    case '!': case '#': case '$': case '%': case '*': case '+': case '-':
+    case '/': case '<': case '=': case '>': case '?': case '@': case '\\':
+    case '^': case '|': case '~':
+      return true;
+    default: return false;
+    }
+  }
 
   public String toString() {
-    switch (this) {
-    case ADD:      return "+";
-    case SUBTRACT: return "-";
-    case MULTIPLY: return "*";
-    case DIVIDE:   return "/";
-    default: return null;
-    }
+    return symbol;
   }
 
   public double apply(double lhs, double rhs) {
@@ -312,6 +355,7 @@ enum Binop {
     case SUBTRACT: return lhs - rhs;
     case MULTIPLY: return lhs * rhs;
     case DIVIDE:   return lhs / rhs;
+    case POWER:    return Math.pow(lhs, rhs);
     default: return -1;
     }
   }
@@ -430,7 +474,7 @@ public class Parser {
   }
 
   private Expr parse(int minPrec) throws SpanException {
-    Expr e;
+    Expr e = null;
 
     Token t = current;
     if (t == null) {
@@ -466,13 +510,21 @@ public class Parser {
               current.spanBegin, current.spanBegin + current.spanLength);
       bump();
       break;
-    case OP_PLUS:
-      e = parse(2);
+    case BINOP: {
+      Binop b = (Binop) t.content;
+      if (b == Binop.ADD) // unary +
+        e = parse(2);
+      else if (b == Binop.SUBTRACT) // unary -
+        e = new NegateExpr(parse(2));
+      else
+        fatal("unexpected binary operator: " + b.toString(),
+              t.spanBegin, t.spanBegin + t.spanLength);
       break;
-    case OP_MINUS:
-      e = new NegateExpr(parse(2));
-      break;
+    }
     default:
+      break;
+    }
+    if (e == null) {
       fatal("unexpected token: " + t.type.name(),
             t.spanBegin, t.spanBegin + t.spanLength);
       return null;
@@ -482,14 +534,13 @@ public class Parser {
       t = current;
       if (t == null)
         break;
-      if ((t.type == TokenType.OP_PLUS || t.type == TokenType.OP_MINUS)
-          && minPrec > 0)
-        break;
-      if ((t.type == TokenType.OP_MUL || t.type == TokenType.OP_DIV)
-          && minPrec > 1)
-        break;
       if (t.type == TokenType.PAREN_CLOSE)
         break;
+      if (t.type == TokenType.BINOP) {
+        Binop b = (Binop) t.content;
+        if (minPrec > b.precedence )
+          break;
+      }
 
       e = parseWithLhs(e, minPrec);
     }
@@ -498,22 +549,18 @@ public class Parser {
   }
 
   private Expr parseWithLhs(Expr lhs, int minPrec) throws SpanException {
-    Binop b;
     Token t = current;
     bump();
-    switch (t.type) {
-    case OP_PLUS:  b = Binop.ADD;      break;
-    case OP_MINUS: b = Binop.SUBTRACT; break;
-    case OP_MUL:   b = Binop.MULTIPLY; break;
-    case OP_DIV:   b = Binop.DIVIDE;   break;
-    default:
+    if (t.type != TokenType.BINOP)
       fatal("unexpected token: " + t.type.name(),
             t.spanBegin, t.spanBegin + t.spanLength);
-      return null;
-    }
-    if ((b == Binop.MULTIPLY || b == Binop.DIVIDE) && minPrec == 0)
-      minPrec = 1;
-    Expr rhs = parse(minPrec + 1);
+    Binop b = (Binop) t.content;
+
+    if (minPrec < b.precedence)
+      minPrec = b.precedence;
+    if (b.assoc == Assoc.LEFT)
+      ++minPrec;
+    Expr rhs = parse(minPrec);
 
     return new BinopExpr(b, lhs, rhs);
   }
@@ -523,11 +570,15 @@ public class Parser {
     throw new SpanException(msg, spanBegin, spanEnd - spanBegin);
   }
 
-  private void bump() {
-    if (!tokenizer.hasNext())
+  private void bump() throws SpanException {
+    if (!tokenizer.hasNext()) {
       current = null;
-    else
+      SpanException e = tokenizer.getError();
+      if (e != null)
+        throw e;
+    } else {
       current = tokenizer.next();
+    }
   }
 
   String src;
