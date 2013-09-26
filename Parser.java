@@ -304,17 +304,12 @@ class VarExpr extends Expr {
 
 enum Assoc { LEFT, RIGHT }
 
-// prec;
-// 0 + -
-// 1 * /
-// 2 unary + -
-
 enum Binop {
   ADD      (0, Assoc.LEFT,  "+"),
   SUBTRACT (0, Assoc.LEFT,  "-"),
   MULTIPLY (1, Assoc.LEFT,  "*"),
   DIVIDE   (1, Assoc.LEFT,  "/"),
-  POWER    (3, Assoc.RIGHT, "**");
+  POWER    (2, Assoc.RIGHT, "**");
 
 
   public int precedence;
@@ -513,9 +508,9 @@ public class Parser {
     case BINOP: {
       Binop b = (Binop) t.content;
       if (b == Binop.ADD) // unary +
-        e = parse(2);
+        e = parse(4);
       else if (b == Binop.SUBTRACT) // unary -
-        e = new NegateExpr(parse(2));
+        e = new NegateExpr(parse(4));
       else
         fatal("unexpected binary operator: " + b.toString(),
               t.spanBegin, t.spanBegin + t.spanLength);
