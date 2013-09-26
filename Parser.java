@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Dictionary;
+import java.util.Hashtable;
 
 class Util {
   public static String escapeChar(char c) {
@@ -66,6 +67,9 @@ enum TokenType {
   BINOP,
   PAREN_OPEN,
   PAREN_CLOSE,
+  LET,
+  IN,
+  EQUALS,
 }
 
 class Token {
@@ -206,10 +210,13 @@ class Tokenizer implements Iterator<Token> {
     int begin = pos;
     ++pos;
     consumeIdentChars();
-    Token t = new Token(TokenType.IDENT,
-        src.substring(begin, pos),
-        begin, pos - begin);
-    return t;
+    String s = src.substring(begin, pos);
+    if (s.equals("let"))
+      return new Token(TokenType.LET, null, begin, pos - begin);
+    else if (s.equals("in"))
+      return new Token(TokenType.IN, null, begin, pos - begin);
+    else
+      return new Token(TokenType.IDENT, s, begin, pos - begin);
   }
 
   private Token consumeBinop() throws SpanException {
@@ -217,11 +224,12 @@ class Tokenizer implements Iterator<Token> {
     ++pos;
     consumeBinopChars();
     String s = src.substring(begin, pos);
+    if (s.equals("="))
+      return new Token(TokenType.EQUALS, null, begin, pos - begin);
     Binop b = Binop.fromString(s);
     if (b == null)
       fatal("unknown binary operator: " + s, begin, pos);
-    Token t = new Token(TokenType.BINOP, b, begin, pos - begin);
-    return t;
+    return new Token(TokenType.BINOP, b, begin, pos - begin);
   }
 
   private void fatal(String msg, int spanBegin, int spanEnd)
@@ -426,6 +434,33 @@ class NegateExpr extends Expr {
   Expr inner;
 }
 
+class LetInExpr extends Expr {
+  public double eval(Dictionary<String, Double> vars) {
+    Double oldVal = vars.put(ident, boundValue.eval(vars));
+    double result = inner.eval(vars);
+    if (oldVal != null)
+      vars.put(ident, oldVal);
+    else
+      vars.remove(ident);
+    return result;
+  }
+
+  public String toString() {
+    return "let " + ident + " = " + boundValue.toString()
+           + " in " + inner.toString();
+  }
+
+  public LetInExpr(String s, Expr b, Expr i) {
+    ident = s;
+    boundValue = b;
+    inner = i;
+  }
+
+  String ident;
+  Expr boundValue;
+  Expr inner;
+}
+
 public class Parser {
   static Expr parse(String src) throws SpanException {
     Parser p = new Parser(src);
@@ -437,6 +472,7 @@ public class Parser {
     try {
       Expr e = parse(src);
       System.out.println(e.toString());
+      System.out.println(e.eval(new Hashtable<String, Double>()));
     } catch (SpanException error) {
     // Tokenizer t = new Tokenizer(src);
     // while (t.hasNext()) {
@@ -516,6 +552,25 @@ public class Parser {
               t.spanBegin, t.spanBegin + t.spanLength);
       break;
     }
+    case LET: {
+      Token ident = current;
+      if (ident == null || ident.type != TokenType.IDENT)
+        fatal("expected identifier, got " + ident.type.name(),
+              ident.spanBegin, ident.spanBegin + ident.spanLength);
+      bump();
+      if (current == null || current.type != TokenType.EQUALS)
+        fatal("expected '=', got " + current.type.name(),
+              current.spanBegin, current.spanBegin + current.spanLength);
+      bump();
+      Expr bound = parse(0);
+      if (current == null || current.type != TokenType.IN)
+        fatal("expected 'in', got " + current.type.name(),
+              current.spanBegin, current.spanBegin + current.spanLength);
+      bump();
+      Expr inner = parse(0);
+      e = new LetInExpr((String) ident.content, bound, inner);
+      break;
+    }
     default:
       break;
     }
@@ -529,11 +584,11 @@ public class Parser {
       t = current;
       if (t == null)
         break;
-      if (t.type == TokenType.PAREN_CLOSE)
-        break;
       if (t.type == TokenType.BINOP) {
         Binop b = (Binop) t.content;
         if (minPrec > b.precedence )
+          break;
+      } else {
           break;
       }
 
