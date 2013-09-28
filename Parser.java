@@ -94,14 +94,11 @@ class Token {
         String.format("Token %-11s ", type.name()));
     switch (type) {
       case LIT_NUM:
-        System.out.println(((Double) content).toString());
-        break;
       case IDENT:
-        System.out.println((String) content);
-        break;
       case BINOP:
-      case PAREN_OPEN:
-      case PAREN_CLOSE:
+        System.out.println(content);
+        break;
+      default:
         System.out.println();
         break;
     }
@@ -481,16 +478,17 @@ public class Parser {
   public static void main(String[] args) throws IOException, SpanException {
     String src = args[0];
     try {
+      Tokenizer t = new Tokenizer(src);
+      while (t.hasNext()) {
+        t.next().print(src);
+      }
+      SpanException error = t.getError();
+      if (error != null)
+        throw error;
       Expr e = parse(src);
       System.out.println(e.toString());
       System.out.println(e.eval(new Hashtable<String, Double>()));
     } catch (SpanException error) {
-    // Tokenizer t = new Tokenizer(src);
-    // while (t.hasNext()) {
-    //   t.next().print(src);
-    // }
-    // SpanException error = t.getError();
-    // if (error != null) {
       System.out.println("error: " + error.toString());
       BufferedWriter wr = new BufferedWriter(
           new OutputStreamWriter(System.out));
