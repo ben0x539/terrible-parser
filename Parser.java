@@ -516,23 +516,14 @@ public class Parser {
   private Expr parse(int minPrec) throws SpanException {
     Expr e = null;
 
-    Token t = current;
-    if (t == null) {
-      fatal("illegal eof", src.length(), src.length());
-    }
-    bump();
+    Token t = consume();
 
     switch (t.type) {
     case IDENT:
       if (current != null && current.type == TokenType.PAREN_OPEN) {
         bump();
         e = parse(0);
-        if (current == null)
-          fatal("expected PAREN_CLOSE, got eof", src.length(), src.length());
-        if (current.type != TokenType.PAREN_CLOSE)
-          fatal("expected PAREN_CLOSE, got " + current.type.name(),
-                current.spanBegin, current.spanBegin + current.spanLength);
-        bump();
+        consume(TokenType.PAREN_CLOSE);
         e = new FnExpr((String) t.content, e);
       } else {
         e = new VarExpr((String) t.content);
@@ -543,12 +534,7 @@ public class Parser {
       break;
     case PAREN_OPEN:
       e = new ParenExpr(parse(0));
-      if (current == null)
-        fatal("expected PAREN_CLOSE, got eof", src.length(), src.length());
-      if (current.type != TokenType.PAREN_CLOSE)
-        fatal("expected PAREN_CLOSE, got " + current.type.name(),
-              current.spanBegin, current.spanBegin + current.spanLength);
-      bump();
+      consume(TokenType.PAREN_CLOSE);
       break;
     case BINOP: {
       Binop b = (Binop) t.content;
@@ -562,20 +548,10 @@ public class Parser {
       break;
     }
     case LET: {
-      Token ident = current;
-      if (ident == null || ident.type != TokenType.IDENT)
-        fatal("expected identifier, got " + ident.type.name(),
-              ident.spanBegin, ident.spanBegin + ident.spanLength);
-      bump();
-      if (current == null || current.type != TokenType.EQUALS)
-        fatal("expected '=', got " + current.type.name(),
-              current.spanBegin, current.spanBegin + current.spanLength);
-      bump();
+      Token ident = consume(TokenType.IDENT);
+      consume(TokenType.EQUALS);
       Expr bound = parse(0);
-      if (current == null || current.type != TokenType.IN)
-        fatal("expected 'in', got " + current.type.name(),
-              current.spanBegin, current.spanBegin + current.spanLength);
-      bump();
+      consume(TokenType.IN);
       Expr inner = parse(0);
       e = new LetInExpr((String) ident.content, bound, inner);
       break;
@@ -608,11 +584,7 @@ public class Parser {
   }
 
   private Expr parseWithLhs(Expr lhs, int minPrec) throws SpanException {
-    Token t = current;
-    bump();
-    if (t.type != TokenType.BINOP)
-      fatal("unexpected token: " + t.type.name(),
-            t.spanBegin, t.spanBegin + t.spanLength);
+    Token t = consume(TokenType.BINOP);
     Binop b = (Binop) t.content;
 
     if (minPrec < b.precedence)
@@ -622,6 +594,32 @@ public class Parser {
     Expr rhs = parse(minPrec);
 
     return new BinopExpr(b, lhs, rhs);
+  }
+
+  private Token consume() throws SpanException {
+    expect();
+    Token t = current;
+    bump();
+    return t;
+  }
+
+  private Token consume(TokenType tt) throws SpanException {
+    expect(tt);
+    Token t = current;
+    bump();
+    return t;
+  }
+
+  private void expect() throws SpanException {
+    if (current == null)
+      fatal("expected token, got EOF", src.length()-1, src.length()-1);
+  }
+
+  private void expect(TokenType tt) throws SpanException {
+    expect();
+    if (current.type != tt)
+      fatal("expected " + tt + ", got " + current.type.name(),
+            current.spanBegin, current.spanBegin + current.spanLength);
   }
 
   private void fatal(String msg, int spanBegin, int spanEnd)
